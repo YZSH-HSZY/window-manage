@@ -1,5 +1,7 @@
 from ctypes.wintypes import HWND
 import asyncio
+import sys
+from queue import Queue
 import threading
 from typing import Callable, AsyncGenerator, List, Optional
 from win32gui import EnumWindows, GetClassName, GetWindowText, \
@@ -52,16 +54,29 @@ class Window:
         print("close method will complete")
         pass
 
+class ResourceMamagement(metaclass=SingletonType):
+    """ 资源管理，处理多线程和协程释放 """
+    dispatch_queue: Queue  # 管理基本调度单位的释放
+    def __init__(self) -> None:
+        self.dispatch_queue = Queue()
+    def closed(self) -> int:
+        """ 释放资源,return 进程退出标志 """
+        WindowProducer().closed()
+        return 0
+
 class WindowProducer(metaclass=SingletonType):
     """ 单例.获取window窗口类 """
     filter_func: Callable  # 窗口过滤器函数
     producer_timer: AsyncGenerator  # 异步生成所有窗口列表
     windows_queue: List[Window]  # 缓存有效的窗口列表
+    resource_mamagement: ResourceMamagement  # 资源管理friend单例
 
     def __init__(self, filter_func: Optional[Callable] = None) -> None:
         self.filter_func = filter_func
         self.producer_timer = WindowProducer.producer_windows
         self.windows_queue = []
+        self.resource_mamagement = ResourceMamagement()
+        
 
     @classmethod
     async def producer_windows(cls) -> List[int]:
@@ -86,19 +101,34 @@ class WindowProducer(metaclass=SingletonType):
             Window(GetWindowText(i),i, bool(IsWindowVisible(i)))
                 for i in windows_queue
         ] 
-    async def _run(self) -> None:
-        while(await asyncio.sleep(1)):
+    async def _run(self, msg: str = None) -> None:
+        def get_coro_status():
+            class_name = self.__class__.__name__
+            the_status:str = self.resource_mamagement.dispatch_queue.get(
+                block=False)
+            self.resource_mamagement.dispatch_queue.put(
+                item= class_name + 'running',
+                block=False)
+            return the_status.rstrip(class_name)
+        while(get_coro_status() != 'closed'):
+            await asyncio.sleep(1)
             self.hwds_convert_Windows(await self.producer_timer())
     
     def run(self):
+        self.resource_mamagement.dispatch_queue.put(
+            self.__class__.__name__ + 'running'
+        )
         self.run_threading = threading.Thread(
             target = lambda r:asyncio.get_event_loop().run_until_complete(r()),
             args = self._run
         )
         self.run_threading.start()
 
-    def __del__(self) -> None:
+    def closed(self) -> None:
         if hasattr(self, 'run_threading'):
+            self.resource_mamagement.dispatch_queue.put(
+                item=self.__class__.__name__ + 'closed'
+            )
             self.run_threading.join()
 
 # class TESTCase
@@ -110,6 +140,7 @@ def test_signle_func():
     a.new_attr = 90
     assert hasattr(b, 'new_attr') and b.new_attr == a.new_attr
 
+sys.exit(ResourceMamagement().closed())
 # class A():
 #     def __new__(cls) -> 'A':  # cls == <class '__main__.A'>
 #         return super().__new__(cls)
