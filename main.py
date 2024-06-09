@@ -1,5 +1,6 @@
 from ctypes.wintypes import HWND
 import asyncio
+import atexit
 import sys
 from queue import Queue
 import threading
@@ -109,7 +110,7 @@ class WindowProducer(metaclass=SingletonType):
             self.resource_mamagement.dispatch_queue.put(
                 item= class_name + 'running',
                 block=False)
-            return the_status.rstrip(class_name)
+            return the_status.replace(class_name, '')
         while(get_coro_status() != 'closed'):
             await asyncio.sleep(1)
             self.hwds_convert_Windows(await self.producer_timer())
@@ -119,9 +120,10 @@ class WindowProducer(metaclass=SingletonType):
             self.__class__.__name__ + 'running'
         )
         self.run_threading = threading.Thread(
-            target = lambda r:asyncio.get_event_loop().run_until_complete(r()),
-            args = self._run
+            target = lambda r:asyncio.new_event_loop().run_until_complete(r()),
+            args = [self._run]
         )
+        # self.run_threading.setDaemon(True)
         self.run_threading.start()
 
     def closed(self) -> None:
@@ -131,16 +133,36 @@ class WindowProducer(metaclass=SingletonType):
             )
             self.run_threading.join()
 
-# class TESTCase
-def test_signle_func():
-    """测试单例"""
-    a = WindowProducer()
-    b = WindowProducer()
-    assert id(a) == id(b)
-    a.new_attr = 90
-    assert hasattr(b, 'new_attr') and b.new_attr == a.new_attr
+class TestClass:
+    """ 使用pytest测试的test_group """
+    def test_window_producer_signle_func(self):
+        """测试WindowProducer单例"""
+        a = WindowProducer()
+        b = WindowProducer()
+        assert id(a) == id(b)
+        a.new_attr = 90
+        assert hasattr(b, 'new_attr') and b.new_attr == a.new_attr
+    
+    def test_resource_mamagement_signle_func(self):
+        """测试ResourceMamagement单例"""
+        a = ResourceMamagement()
+        b = ResourceMamagement()
+        assert id(a) == id(b)
+        a.new_attr = 90
+        assert hasattr(b, 'new_attr') and b.new_attr == a.new_attr
+    def test_window_producer_threading_run_func(self):
+        win = WindowProducer()
+        win.run()
+        assert win.run_threading.is_alive()
+        print('current threads num is : ', threading.active_count())
+        win.closed()
 
-sys.exit(ResourceMamagement().closed())
+
+# sys.exit(ResourceMamagement().closed())
+atexit.register(ResourceMamagement().closed)
+
+if __name__ == "__main__":
+    TestClass().test_window_producer_threading_run_func()
 # class A():
 #     def __new__(cls) -> 'A':  # cls == <class '__main__.A'>
 #         return super().__new__(cls)
