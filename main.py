@@ -1,10 +1,12 @@
 from ctypes.wintypes import HWND
 import asyncio
 import atexit
+import functools
+import re
 import sys
 from queue import Queue
 import threading
-from typing import Callable, AsyncGenerator, List, Optional
+from typing import Any, Callable, AsyncGenerator, List, Optional
 from win32gui import EnumWindows, GetClassName, GetWindowText, \
     ShowWindow, SetWindowPos, SetForegroundWindow, IsWindowVisible
 from win32con import SW_SHOWNORMAL, HWND_TOPMOST, \
@@ -124,6 +126,7 @@ class WindowProducer(metaclass=SingletonType):
             args = [self._run]
         )
         # self.run_threading.setDaemon(True)
+        self.run_threading.daemon = True
         self.run_threading.start()
 
     def closed(self) -> None:
@@ -132,6 +135,120 @@ class WindowProducer(metaclass=SingletonType):
                 item=self.__class__.__name__ + 'closed'
             )
             self.run_threading.join()
+
+class DefaultWindowFilter:
+    """ 接口，默认窗口过滤器
+     在过滤规则中rules中，使用正则表达式进行窗口过滤
+     其中`$`指代窗口，多个窗口字段过滤规则以and区别
+
+     每条规则允许的操作包含
+     \n 1. match
+     \n 2. ==
+     \n 3. is
+     \n 4. in
+     \n **注意** 操作两端需以空格分开
+    """
+    rules: str  # 过滤规则，使用
+    def __init__(self) -> None:
+        """ 初始化默认窗口过滤规则 """
+        # 默认只保留窗口标题包含中文字符并且窗口可见的窗口对象
+        self.rules = r"$.title match {.*[\u4e00-\u9fa5].*} "\
+                        r"and $.visible is true"
+    def filter_func(self, windows: List[Window]) -> List[Window]:
+        """接受需要过滤的窗口对象列表，返回过滤后的窗口列表 
+        
+        Args:
+            windows (List[Window]): 需要过滤的窗口对象列表
+        
+        Returns:
+            List[Window]: 过滤后的窗口列表
+        """
+        res: List[Window] = []
+        for i in windows:
+            if self.pass_rules(i):
+                res.append(i)
+        return res
+    def pass_rules(self, a_window: Window) -> bool:
+        """判断一个窗口对象能否通过过滤规则 
+        
+        Args:
+            a_window (Window): 输入的窗口对象
+        
+        Returns:
+            bool: 窗口是否合规
+        """
+        self.rules = self.rules.strip()
+        assert self.rules.startswith('$'), "过滤规则请以窗口对象代指$开头"
+        def match_op(re_expr: str, window_attribute: str) -> bool:
+            return bool(re.match(re_expr, window_attribute))
+        
+        def equals_op(re_expr: str|bool, window_attribute: str|bool) -> bool:
+            return type(window_attribute) == type(re_expr) and \
+                window_attribute == re_expr
+        
+        def is_op(re_expr: bool|None, window_attribute: bool|None) -> bool:
+            return type(window_attribute) == type(re_expr) and \
+                window_attribute is re_expr
+        
+        # def in_op(re_expr: str, window_attribute: str) -> bool:
+        #     # TODO
+        #     return bool(re.match(re_expr, window_attribute))
+        def conv_expr_type(expr: str) -> bool|None:
+            """转换表达式到python内置类型，仅转换bool/none 
+            
+            Args:
+                expr (str): 输入表达式
+            
+            Raises:
+                Exception: 接受非法expr
+
+            Returns:
+                bool|None: 返回类型
+            """
+            if expr.lower() in ['none', 'null']:
+                return None
+            elif expr.lower() in ['true', 'false']:
+                return True if expr.lower() == 'true' else False
+            raise Exception('解析rules expr出错')
+        
+        def rule_verify(a_rule: str, a_window: Window) -> Callable[..., bool]:
+            """ 进行规则有效性校验和对有效规则返回对应的方法调用 """
+            assert a_rule.startswith('$'), "过滤规则请以窗口对象代指$开头"
+            mat_groups = re.match(r"\$\.(\S+)\s+(match|==|is|in)\s+(.*)",a_rule)
+            if mat_groups is None:
+                print('error:the rules is illegal')  # 输出错误信息
+                return
+            # 窗口属性
+            the_window_attr = mat_groups.group(1)
+            assert hasattr(a_window, the_window_attr), \
+                f"窗口对象无属性{the_window_attr}"
+            the_window_attr = getattr(a_window, the_window_attr)
+            # 操作转发
+            the_op = mat_groups.group(2)
+            # 表达式
+            the_expr = mat_groups.group(3)
+            if the_op == 'match':
+                assert the_expr[0] == '{' and the_expr[-1] == '}', "match expr error"
+                return functools.partial(match_op, the_expr[1:-1], the_window_attr)
+            elif the_op == '==':
+                if the_expr.lower() in ['true', 'false']:
+                    return functools.partial(equals_op, conv_expr_type(the_expr), the_window_attr)
+                else:
+                    return functools.partial(equals_op, the_expr, the_window_attr)
+            elif the_op == 'is':
+                return functools.partial(is_op, conv_expr_type(the_expr), the_window_attr)
+            elif the_op == 'in':
+                print('in_op is TODO')            
+        
+        rules_items = self.rules.split('and')
+        for the_rule in rules_items:
+            the_rule = the_rule.strip()
+            # 窗口不匹配其中一条规则，返回失败过滤结果
+            if not rule_verify(the_rule, a_window)():
+                return False
+        return True
+
+
 
 class TestClass:
     """ 使用pytest测试的test_group """
@@ -156,6 +273,16 @@ class TestClass:
         assert win.run_threading.is_alive()
         print('current threads num is : ', threading.active_count())
         win.closed()
+    def test_default_window_filter_func(self, monkeypatch):
+        """ 测试窗口过滤器 """
+        # mock_
+        print('all monkeypatch attr key : ', dir(monkeypatch))
+        # monkeypatch.setattr(requests, "get", mock_get)
+        mock_window_obj = None
+        monkeypatch.setattr(mock_window_obj, "title", "window_mock_obj")
+        monkeypatch.setattr(mock_window_obj, "hwd", "window_mock_obj")
+        monkeypatch.setattr(mock_window_obj, "visible", "window_mock_obj")
+        assert 'mock' == 'mock'
 
 
 # sys.exit(ResourceMamagement().closed())
@@ -163,9 +290,3 @@ atexit.register(ResourceMamagement().closed)
 
 if __name__ == "__main__":
     TestClass().test_window_producer_threading_run_func()
-# class A():
-#     def __new__(cls) -> 'A':  # cls == <class '__main__.A'>
-#         return super().__new__(cls)
-#     def __init__(self) -> None:
-#         self.a = 3
-# A()

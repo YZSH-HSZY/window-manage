@@ -161,3 +161,8 @@ cython_debug/
 
 
 super.ipynb
+t.py
+all_unicode_char.txt
+thread.ipynb
+unicode_test.py
+unicode.ipynb
