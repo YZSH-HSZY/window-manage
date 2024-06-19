@@ -1,7 +1,9 @@
+from contextlib import contextmanager
 from ctypes.wintypes import HWND
 import asyncio
 import atexit
 import functools
+from io import StringIO, TextIOBase
 import re
 import sys
 from queue import Queue
@@ -98,12 +100,14 @@ class WindowProducer(metaclass=SingletonType):
         ] 
     def print_interface(self) -> List[Window]:
         """ 输出窗口列表 """
-        windows_queue = self.windows_queue \
-            if self.windows_queue else []
-        return [
-            Window(GetWindowText(i),i, bool(IsWindowVisible(i)))
-                for i in windows_queue
-        ] 
+        # windows_queue = self.windows_queue \
+        #     if self.windows_queue else []
+        # return [
+        #     Window(GetWindowText(i),i, bool(IsWindowVisible(i)))
+        #         for i in windows_queue
+        # ] 
+        if isinstance(self.windows_queue, list):
+            return self.windows_queue
     async def _run(self, msg: str = None) -> None:
         def get_coro_status():
             class_name = self.__class__.__name__
@@ -275,18 +279,46 @@ class TestClass:
         win.closed()
     def test_default_window_filter_func(self, monkeypatch):
         """ 测试窗口过滤器 """
-        # mock_
-        print('all monkeypatch attr key : ', dir(monkeypatch))
-        # monkeypatch.setattr(requests, "get", mock_get)
-        mock_window_obj = None
+        # print('all monkeypatch attr key : ', dir(monkeypatch))
+        mock_window_obj = Window("", 0, True)
         monkeypatch.setattr(mock_window_obj, "title", "window_mock_obj")
-        monkeypatch.setattr(mock_window_obj, "hwd", "window_mock_obj")
-        monkeypatch.setattr(mock_window_obj, "visible", "window_mock_obj")
+        monkeypatch.setattr(mock_window_obj, "hwd", 1)
+        monkeypatch.setattr(mock_window_obj, "visible", False)
+        the_filter = DefaultWindowFilter()
+        assert the_filter.filter_func([mock_window_obj]).__len__() == 0
+        monkeypatch.setattr(mock_window_obj, "visible", True)
+        assert the_filter.filter_func([mock_window_obj]).__len__() == 0
+        monkeypatch.setattr(mock_window_obj, "title", "window_mock_obj测试")
+        assert the_filter.filter_func([mock_window_obj]).__len__() == 1
+        monkeypatch.setattr(mock_window_obj, "visible", False)
+        assert the_filter.filter_func([mock_window_obj]).__len__() == 0
         assert 'mock' == 'mock'
 
 
 # sys.exit(ResourceMamagement().closed())
 atexit.register(ResourceMamagement().closed)
 
+def first_dev_script():
+    """ 显示dev_script分支开发成果 """
+    the_producer = WindowProducer()
+    the_producer.run()
+
+    @contextmanager
+    def stdout_content():
+        # temp = sys.stdout.write
+        class FObject:
+            pass
+        f = FObject()
+        def f_write(x: str):
+            sys.stdout.write(x)
+            sys.stdout.flush()
+            sys.stdout.write('\x08' * len(x))
+        f.write = f_write
+        yield f
+        # sys.stdout = temp
+    with stdout_content() as f:
+        f.write('hello')
+
 if __name__ == "__main__":
-    TestClass().test_window_producer_threading_run_func()
+    # TestClass().test_window_producer_threading_run_func()
+    first_dev_script()
