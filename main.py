@@ -100,14 +100,16 @@ class WindowProducer(metaclass=SingletonType):
         ] 
     def print_interface(self) -> List[Window]:
         """ 输出窗口列表 """
-        # windows_queue = self.windows_queue \
-        #     if self.windows_queue else []
-        # return [
-        #     Window(GetWindowText(i),i, bool(IsWindowVisible(i)))
-        #         for i in windows_queue
-        # ] 
-        if isinstance(self.windows_queue, list):
+        if isinstance(self.windows_queue, list) and \
+                all([isinstance(i, Window) for i in self.windows_queue]):
             return self.windows_queue
+        else:
+            windows_queue = self.windows_queue \
+                if self.windows_queue else []
+            return [
+                Window(GetWindowText(i),i, bool(IsWindowVisible(i)))
+                    for i in windows_queue
+            ] 
     async def _run(self, msg: str = None) -> None:
         def get_coro_status():
             class_name = self.__class__.__name__
@@ -305,6 +307,8 @@ def first_dev_script():
 
     @contextmanager
     def stdout_content():
+        """ 一个简易的cli接口显示窗口列表 """
+        # cli显示init操作
         # temp = sys.stdout.write
         class FObject:
             pass
@@ -316,8 +320,23 @@ def first_dev_script():
         f.write = f_write
         yield f
         # sys.stdout = temp
+        # cli显示清理操作
+        # TODO
+    def cli_display_style():
+        """ 简易cli显示窗口界面样式 """
+        get_windows = the_producer.print_interface()
+        from pandas import DataFrame
+        from dataclasses import make_dataclass
+
+        WindowTableCli = make_dataclass(
+            cls_name='WindowTableCli', 
+            fields=[('hwnd', int), ('title', str), ('visible', bool)])
+        the_table = DataFrame([WindowTableCli(v.hwd, v.title, v.visible) 
+                           for v in get_windows])
+        return the_table.to_markdown()
+
     with stdout_content() as f:
-        f.write('hello')
+        f.write(cli_display_style())
 
 if __name__ == "__main__":
     # TestClass().test_window_producer_threading_run_func()
